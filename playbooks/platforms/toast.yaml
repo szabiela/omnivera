@@ -1,0 +1,48 @@
+platform: toast
+name: Toast POS
+domains:
+  - pos.toasttab.com
+  - www.toasttab.com
+auth_type: session_scrape
+
+login:
+  url: https://pos.toasttab.com/login
+  steps:
+    - act: "enter {email} into the email or username field"
+    - act: "enter {password} into the password field"
+    - act: "click the login or sign in button"
+  success_signal:
+    url_contains: "/restaurants"
+    element_exists: "dashboard navigation or sidebar menu"
+  tfa:
+    detect: "verification code, two-factor authentication, or security code"
+    input: "enter {tfa_code} into the verification code field"
+    submit: "click verify or continue"
+
+extract_data:
+  steps:
+    - act: "navigate to the reporting or analytics section"
+    - act: "look for sales summary, sales report, or revenue overview"
+    - extract:
+        name: sales_summary
+        instruction: "the sales summary data visible on the page — total sales, net sales, number of orders, and any date range shown. Return as structured data."
+    - act: "navigate to orders or order history"
+    - extract:
+        name: recent_orders
+        instruction: "the most recent orders with their order numbers, totals, timestamps, and payment methods. Return as a structured list."
+    - act: "navigate to the menu or menu performance section if available"
+    - extract:
+        name: menu_data
+        instruction: "menu item performance data — item names, quantities sold, and revenue per item if visible"
+    - act: "navigate to payment or payout reports if available"
+    - extract:
+        name: payout_data
+        instruction: "recent payout or deposit information — dates, amounts, and status"
+
+result:
+  type: session
+  fields:
+    - sales_summary
+    - recent_orders
+    - menu_data
+    - payout_data

@@ -1,0 +1,42 @@
+platform: resident_advisor
+name: Resident Advisor (RA)
+domains:
+  - ra.co
+  - www.residentadvisor.net
+auth_type: session_scrape
+
+login:
+  url: https://ra.co/login
+  steps:
+    - act: "enter {email} into the email field"
+    - act: "enter {password} into the password field"
+    - act: "click the login or sign in button"
+  success_signal:
+    url_contains: "/promoter"
+  tfa:
+    detect: "verification code, confirmation email, or two-factor authentication"
+    input: "enter {tfa_code} into the verification code field"
+    submit: "click verify or confirm"
+
+extract_data:
+  steps:
+    - act: "navigate to the promoter dashboard or RA Pro dashboard"
+    - act: "find and click on events, event management, or my events"
+    - extract:
+        name: events_list
+        instruction: "all visible events with their names, dates, venues, and ticket sales numbers"
+    - act: "navigate to reports, analytics, or sales data section"
+    - extract:
+        name: sales_summary
+        instruction: "sales summary or revenue overview — total tickets sold, total revenue, and any per-event breakdown"
+    - act: "navigate to guest list, attendee data, or customer data if available"
+    - extract:
+        name: guest_data
+        instruction: "any visible guest or attendee data — names, emails, ticket types, purchase dates"
+
+result:
+  type: session
+  fields:
+    - events_list
+    - sales_summary
+    - guest_data

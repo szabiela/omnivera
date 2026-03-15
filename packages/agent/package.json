@@ -1,0 +1,19 @@
+{
+  "name": "@omnivera/agent",
+  "version": "0.1.0",
+  "description": "Agent runtime — runs inside ephemeral Browserbase containers",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.0",
+    "@browserbasehq/stagehand": "^2.0.0",
+    "playwright-core": "^1.44.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

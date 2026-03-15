@@ -1,0 +1,26 @@
+{
+  "name": "omnivera",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Securely connect to any SaaS platform using AI browser agents",
+  "workspaces": [
+    "packages/client",
+    "packages/server",
+    "packages/agent"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev": "npm run dev --workspaces --if-present",
+    "test": "vitest",
+    "lint": "eslint packages/*/src/**/*.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0",
+    "@types/node": "^20.11.0",
+    "eslint": "^8.57.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
