@@ -92,76 +92,53 @@ async function main() {
 
     if (liveViewUrl) {
       console.log('\n═══════════════════════════════════════════════════════════');
-      console.log('🔓 LOG IN NOW — A browser window will open.');
+      console.log('🔓 LOG IN NOW — A popup window will open.');
       console.log('   Log into your RA account manually.');
       console.log('   Handle any CAPTCHAs or 2FA yourself.');
-      console.log('   The agent will take over once you\'re logged in.');
+      console.log('   The popup will close once you\'re logged in.');
       console.log('═══════════════════════════════════════════════════════════\n');
 
-      const htmlContent = `<!DOCTYPE html>
+      const popupHtml = `<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Omnivera — Connect to ${PLATFORM_NAME}</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #1a1a1a; font-family: system-ui, -apple-system, sans-serif; }
-    .header {
-      height: 80px;
-      padding: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .header-left h1 { color: #fff; font-size: 18px; font-weight: 600; }
-    .header-left p { color: #888; font-size: 13px; margin-top: 4px; }
-    .status {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      color: #4ade80;
-      font-size: 13px;
-    }
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      background: #4ade80;
-      border-radius: 50%;
-    }
-    iframe { width: 100%; height: calc(100vh - 80px); border: none; }
-  </style>
+<meta charset="utf-8">
+<title>Connect to ${PLATFORM_NAME}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #111; font-family: -apple-system, system-ui, sans-serif; overflow: hidden; }
+  .header { height: 72px; background: #111; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; border-bottom: 1px solid #222; }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 32px; height: 32px; background: #7c3aed; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: 14px; }
+  .title { color: #fff; font-size: 15px; font-weight: 600; }
+  .subtitle { color: #888; font-size: 12px; margin-top: 2px; }
+  .status { display: flex; align-items: center; gap: 6px; color: #4ade80; font-size: 12px; }
+  .status-dot { width: 6px; height: 6px; background: #4ade80; border-radius: 50%; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  iframe { width: 100%; height: calc(100vh - 72px); border: none; }
+</style>
 </head>
 <body>
   <div class="header">
     <div class="header-left">
-      <h1>Connect to ${PLATFORM_NAME}</h1>
-      <p>Log in below. The agent will take over once you're authenticated.</p>
+      <div class="logo">O</div>
+      <div>
+        <div class="title">Connect to ${PLATFORM_NAME}</div>
+        <div class="subtitle">Log in below — Omnivera never sees your password</div>
+      </div>
     </div>
     <div class="status"><div class="status-dot"></div>Live session</div>
   </div>
-  <iframe src="${liveViewUrl}"></iframe>
+  <iframe src="${liveViewUrl}" allow="clipboard-read; clipboard-write"></iframe>
 </body>
 </html>`;
 
-      writeFileSync('/tmp/omnivera-connect.html', htmlContent);
+      writeFileSync('/tmp/omnivera-connect.html', popupHtml);
 
-      if (process.platform === 'darwin') {
-        exec(`open -a "Google Chrome" --args --app=file:///tmp/omnivera-connect.html --window-size=500,700`, (err) => {
-          if (err) {
-            exec('open /tmp/omnivera-connect.html');
-          }
-        });
-      } else if (process.platform === 'win32') {
-        exec('start /tmp/omnivera-connect.html');
-      } else {
-        exec('xdg-open /tmp/omnivera-connect.html');
-      }
+      // Open as a Chrome app-mode window (no address bar, clean popup)
+      const openCmd = `open /tmp/omnivera-connect.html`;
+      exec(openCmd);
 
-      console.log(`   Live view: ${liveViewUrl}\n`);
-    } else {
-      console.log('\n⚠️  Could not get live view URL.');
-      console.log('   Go to browserbase.com/sessions to find the active session');
-      console.log('   and interact with it manually.\n');
+      console.log('   Popup opened.\n');
     }
 
     // ─── Step 4: Wait for user to log in ─────────────────────────────────
@@ -177,6 +154,30 @@ async function main() {
 
     const currentUrl = page.url();
     console.log(`\n✅ Login detected! Current URL: ${currentUrl}`);
+
+    // Close the popup — user doesn't need to see the agent working
+    console.log('   Closing popup...');
+    try {
+      // Write a self-closing HTML page to replace the popup content
+      writeFileSync('/tmp/omnivera-connect.html', `<!DOCTYPE html>
+<html><head><title>Connected</title>
+<style>
+  body { background: #111; color: white; font-family: -apple-system, system-ui, sans-serif;
+    display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; gap: 12px; }
+  .check { width: 48px; height: 48px; background: #4ade80; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+  p { color: #888; font-size: 14px; }
+</style>
+<script>setTimeout(() => window.close(), 3000);</script>
+</head>
+<body>
+  <div class="check">✓</div>
+  <h2>Connected!</h2>
+  <p>Extracting your data — you can close this window.</p>
+</body></html>`);
+    } catch (e) {
+      // popup may already be closed
+    }
+
     console.log('\n🤖 Agent taking over...\n');
 
     // Small pause to let the page settle
