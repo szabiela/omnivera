@@ -48,6 +48,7 @@ async function main() {
     verbose: 0,
     browserbaseSessionCreateParams: {
       proxies: true,
+      timeout: 180,
       browserSettings: {
         viewport: {
           width: POPUP_WIDTH,

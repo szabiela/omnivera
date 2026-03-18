@@ -15,6 +15,7 @@
 import { Stagehand } from '@browserbasehq/stagehand';
 import { z } from 'zod';
 import { config } from 'dotenv';
+import { unlinkSync } from 'fs';
 import { openPopup, closePopup, POPUP_WIDTH, POPUP_HEIGHT } from './lib/popup';
 
 config();
@@ -47,6 +48,7 @@ async function main() {
     },
     verbose: 0,
     browserbaseSessionCreateParams: {
+      timeout: 180,
       browserSettings: {
         viewport: {
           width: POPUP_WIDTH,
@@ -210,12 +212,30 @@ async function main() {
       return results;
     });
 
+    const tokenValue = Object.values(extractedCreds)[0];
+    if (tokenValue) {
+      console.log('   Validating token against Eventbrite API...');
+      try {
+        const testResponse = await fetch(
+          'https://www.eventbriteapi.com/v3/users/me/',
+          { headers: { Authorization: `Bearer ${tokenValue}` } }
+        );
+        if (testResponse.ok) {
+          console.log('   ✅ Token validated — API access confirmed');
+        } else {
+          console.log(`   ⚠️  Token returned ${testResponse.status}`);
+        }
+      } catch (e: any) {
+        console.log(`   ⚠️  Could not validate token: ${e.message}`);
+      }
+    }
+
     const credKeys = Object.keys(extractedCreds);
     if (credKeys.length > 0) {
       console.log('\n   ✅ API credentials extracted securely!');
       console.log('   Credentials read directly from the DOM — never sent to any AI service.');
       for (const [label, value] of Object.entries(extractedCreds)) {
-        console.log(`   🔑 ${label}: ${value.substring(0, 8)}...${value.substring(value.length - 4)}`);
+        console.log(`   🔑 ${label}: [extracted, ${value.length} chars]`);
       }
       console.log('\n   In production, these would be encrypted and stored immediately.');
       console.log('   No more browser sessions needed for Eventbrite.');
@@ -253,6 +273,14 @@ async function main() {
     }
 
     await page.screenshot({ path: '/tmp/omnivera-extracted.png', fullPage: true });
+
+    try {
+      unlinkSync('/tmp/omnivera-eb-apikeys.png');
+      unlinkSync('/tmp/omnivera-eb-credentials.png');
+      console.log('   🧹 Credential screenshots deleted');
+    } catch (e) {
+      // files may not exist
+    }
 
     // ─── Done ────────────────────────────────────────────────────────────
     console.log('\n═══════════════════════════════════════════════════════════');

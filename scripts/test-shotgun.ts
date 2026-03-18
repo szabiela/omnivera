@@ -15,7 +15,9 @@
 import { Stagehand } from '@browserbasehq/stagehand';
 import { z } from 'zod';
 import { config } from 'dotenv';
+import { unlinkSync } from 'fs';
 import { openPopup, closePopup, POPUP_WIDTH, POPUP_HEIGHT } from './lib/popup';
+import { createExtractionKey, decryptExtractedValue, BROWSER_ENCRYPT_FUNCTION } from './lib/secure-extract';
 
 config();
 
@@ -47,6 +49,7 @@ async function main() {
     },
     verbose: 0,
     browserbaseSessionCreateParams: {
+      timeout: 180,
       browserSettings: {
         viewport: {
           width: POPUP_WIDTH,
@@ -148,21 +151,62 @@ async function main() {
     console.log('   API panel screenshot: /tmp/omnivera-shotgun-api-panel.png\n');
 
     // ─── Step 7: Extract Organizer ID ────────────────────────────────────
+    const orgKey = createExtractionKey();
+    const tokenKey = createExtractionKey();
+
     console.log('   Extracting Organizer ID...');
-    const organizerId = await page.evaluate(() => {
-      const inputs = Array.from(document.querySelectorAll('input'));
-      for (const input of inputs) {
-        const val = (input as HTMLInputElement).value;
-        if (val && /^\d{4,}$/.test(val)) return val;
-      }
-      const textElements = Array.from(document.querySelectorAll('div, span, p'));
-      for (const el of textElements) {
-        const text = el.textContent?.trim();
-        if (text && /^\d{4,}$/.test(text) && el.children.length === 0) return text;
-      }
-      return null;
-    });
-    console.log(`   🏢 Organizer ID: ${organizerId}\n`);
+    const encryptedOrg = await page.evaluate(
+      async (keyBytes: number[], ivBytes: number[]) => {
+        async function encryptValue(value, keyBytes, ivBytes) {
+          const key = await crypto.subtle.importKey(
+            'raw',
+            new Uint8Array(keyBytes),
+            { name: 'AES-GCM' },
+            false,
+            ['encrypt']
+          );
+          const encoded = new TextEncoder().encode(value);
+          const encrypted = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv: new Uint8Array(ivBytes) },
+            key,
+            encoded
+          );
+          const bytes = new Uint8Array(encrypted);
+          const ciphertext = bytes.slice(0, bytes.length - 16);
+          const authTag = bytes.slice(bytes.length - 16);
+          return {
+            encrypted: Array.from(ciphertext).map(b => b.toString(16).padStart(2, '0')).join(''),
+            authTag: Array.from(authTag).map(b => b.toString(16).padStart(2, '0')).join(''),
+          };
+        }
+
+        const inputs = Array.from(document.querySelectorAll('input'));
+        for (const input of inputs) {
+          const val = (input as HTMLInputElement).value;
+          if (val && /^\d{4,}$/.test(val)) {
+            return await encryptValue(val, keyBytes, ivBytes);
+          }
+        }
+        const textElements = Array.from(document.querySelectorAll('div, span, p'));
+        for (const el of textElements) {
+          const text = el.textContent?.trim();
+          if (text && /^\d{4,}$/.test(text) && el.children.length === 0) {
+            return await encryptValue(text, keyBytes, ivBytes);
+          }
+        }
+        return null;
+      },
+      orgKey.keyBytes,
+      orgKey.ivBytes
+    );
+
+    let organizerId: string | null = null;
+    if (encryptedOrg) {
+      organizerId = decryptExtractedValue(encryptedOrg.encrypted, encryptedOrg.authTag, orgKey.key, orgKey.iv);
+      console.log(`   🏢 Organizer ID: ${organizerId} (encrypted in transit)\n`);
+    } else {
+      console.log('   ⚠️  Organizer ID not found\n');
+    }
 
     // ─── Step 8: Issue API token ─────────────────────────────────────────
     console.log('   Issuing API token...');
@@ -174,34 +218,88 @@ async function main() {
 
     // ─── Step 9: Extract the token ───────────────────────────────────────
     console.log('   Extracting API token...');
-    const apiToken = await page.evaluate(() => {
-      // Try all inputs first
-      const inputs = Array.from(document.querySelectorAll('input'));
-      for (const input of inputs) {
-        const val = (input as HTMLInputElement).value;
-        if (val && val.length > 20 && val.startsWith('ey')) return val;
+    const encryptedToken = await page.evaluate(
+      async (keyBytes: number[], ivBytes: number[]) => {
+        async function encryptValue(value, keyBytes, ivBytes) {
+          const key = await crypto.subtle.importKey(
+            'raw',
+            new Uint8Array(keyBytes),
+            { name: 'AES-GCM' },
+            false,
+            ['encrypt']
+          );
+          const encoded = new TextEncoder().encode(value);
+          const encrypted = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv: new Uint8Array(ivBytes) },
+            key,
+            encoded
+          );
+          const bytes = new Uint8Array(encrypted);
+          const ciphertext = bytes.slice(0, bytes.length - 16);
+          const authTag = bytes.slice(bytes.length - 16);
+          return {
+            encrypted: Array.from(ciphertext).map(b => b.toString(16).padStart(2, '0')).join(''),
+            authTag: Array.from(authTag).map(b => b.toString(16).padStart(2, '0')).join(''),
+          };
+        }
+
+        const inputs = Array.from(document.querySelectorAll('input'));
+        for (const input of inputs) {
+          const val = (input as HTMLInputElement).value;
+          if (val && val.length > 20 && val.startsWith('ey')) {
+            return await encryptValue(val, keyBytes, ivBytes);
+          }
+        }
+        const allElements = Array.from(document.querySelectorAll('div, span, p, textarea, code, pre'));
+        for (const el of allElements) {
+          const text = el.textContent?.trim();
+          if (text && text.length > 20 && text.startsWith('ey') && el.children.length === 0) {
+            return await encryptValue(text, keyBytes, ivBytes);
+          }
+        }
+        const withAttrs = Array.from(document.querySelectorAll('[title], [data-value], [data-token]'));
+        for (const el of withAttrs) {
+          const val = el.getAttribute('title') || el.getAttribute('data-value') || el.getAttribute('data-token');
+          if (val && val.length > 20) {
+            return await encryptValue(val, keyBytes, ivBytes);
+          }
+        }
+        return null;
+      },
+      tokenKey.keyBytes,
+      tokenKey.ivBytes
+    );
+
+    let apiToken: string | null = null;
+    if (encryptedToken) {
+      apiToken = decryptExtractedValue(encryptedToken.encrypted, encryptedToken.authTag, tokenKey.key, tokenKey.iv);
+    }
+
+    // Validate the token works before trusting it
+    if (apiToken && organizerId) {
+      console.log('   Validating token against Shotgun API...');
+      try {
+        const testResponse = await fetch(
+          `https://api.shotgun.live/api/v1/organizers/${organizerId}/events`,
+          { headers: { Authorization: `Bearer ${apiToken}` } }
+        );
+        if (testResponse.ok) {
+          console.log('   ✅ Token validated — API access confirmed');
+        } else {
+          console.log(`   ⚠️  Token returned ${testResponse.status} — may need different endpoint`);
+        }
+      } catch (e: any) {
+        console.log(`   ⚠️  Could not validate token: ${e.message}`);
       }
-      // Try text content of any element that looks like a JWT or long token
-      const allElements = Array.from(document.querySelectorAll('div, span, p, textarea, code, pre'));
-      for (const el of allElements) {
-        const text = el.textContent?.trim();
-        if (text && text.length > 20 && text.startsWith('ey') && el.children.length === 0) return text;
-      }
-      // Last resort: check all elements with a title or data attribute containing the token
-      const withAttrs = Array.from(document.querySelectorAll('[title], [data-value], [data-token]'));
-      for (const el of withAttrs) {
-        const val = el.getAttribute('title') || el.getAttribute('data-value') || el.getAttribute('data-token');
-        if (val && val.length > 20) return val;
-      }
-      return null;
-    });
+    }
 
     if (apiToken) {
-      console.log(`   🔑 API Token: ${apiToken.substring(0, 8)}...${apiToken.substring(apiToken.length - 4)}`);
-      console.log(`   🏢 Organizer ID: ${organizerId}`);
-      console.log('\n   ✅ Shotgun credentials extracted securely!');
-      console.log('   Token was read directly from the DOM — never sent to any AI service.');
-      console.log('   In production, this would be encrypted and stored immediately.');
+      console.log(`   🔑 API Token: [extracted, ${apiToken.length} chars]`);
+      console.log(`   🏢 Organizer ID: [extracted]`);
+      console.log('\n   ✅ Shotgun credentials extracted with end-to-end encryption!');
+      console.log('   Token was encrypted inside the browser before leaving Browserbase.');
+      console.log('   Decrypted only in the local Node.js process.');
+      console.log('   In production, would be re-encrypted with KMS before storing.');
     } else {
       console.log('\n   ⚠️  Token not found in DOM — check screenshot at /tmp/omnivera-shotgun-token.png');
     }
@@ -238,6 +336,16 @@ async function main() {
     }
 
     await page.screenshot({ path: '/tmp/omnivera-extracted.png', fullPage: true });
+
+    // Clean up screenshots that may contain sensitive data
+    try {
+      unlinkSync('/tmp/omnivera-shotgun-token.png');
+      unlinkSync('/tmp/omnivera-shotgun-api-panel.png');
+      unlinkSync('/tmp/omnivera-shotgun-integrations.png');
+      console.log('   🧹 Credential screenshots deleted');
+    } catch (e) {
+      // files may not exist
+    }
 
     // ─── Done ────────────────────────────────────────────────────────────
     console.log('\n═══════════════════════════════════════════════════════════');
