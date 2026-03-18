@@ -15,8 +15,7 @@
 import { Stagehand } from '@browserbasehq/stagehand';
 import { z } from 'zod';
 import { config } from 'dotenv';
-import { exec } from 'child_process';
-import { writeFileSync } from 'fs';
+import { openPopup, closePopup, POPUP_WIDTH, POPUP_HEIGHT } from './lib/popup';
 
 config();
 
@@ -46,9 +45,15 @@ async function main() {
       modelName: 'anthropic/claude-sonnet-4-20250514',
       apiKey: anthropicKey,
     },
-    verbose: 0, // Quiet during user login
+    verbose: 0,
     browserbaseSessionCreateParams: {
       proxies: true,
+      browserSettings: {
+        viewport: {
+          width: POPUP_WIDTH,
+          height: POPUP_HEIGHT,
+        },
+      },
     },
   });
 
@@ -98,46 +103,7 @@ async function main() {
       console.log('   The popup will close once you\'re logged in.');
       console.log('═══════════════════════════════════════════════════════════\n');
 
-      const popupHtml = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Connect to ${PLATFORM_NAME}</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #111; font-family: -apple-system, system-ui, sans-serif; overflow: hidden; }
-  .header { height: 72px; background: #111; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; border-bottom: 1px solid #222; }
-  .header-left { display: flex; align-items: center; gap: 12px; }
-  .logo { width: 32px; height: 32px; background: #7c3aed; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: 14px; }
-  .title { color: #fff; font-size: 15px; font-weight: 600; }
-  .subtitle { color: #888; font-size: 12px; margin-top: 2px; }
-  .status { display: flex; align-items: center; gap: 6px; color: #4ade80; font-size: 12px; }
-  .status-dot { width: 6px; height: 6px; background: #4ade80; border-radius: 50%; animation: pulse 2s infinite; }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-  iframe { width: 100%; height: calc(100vh - 72px); border: none; }
-</style>
-</head>
-<body>
-  <div class="header">
-    <div class="header-left">
-      <div class="logo">O</div>
-      <div>
-        <div class="title">Connect to ${PLATFORM_NAME}</div>
-        <div class="subtitle">Log in below — Omnivera never sees your password</div>
-      </div>
-    </div>
-    <div class="status"><div class="status-dot"></div>Live session</div>
-  </div>
-  <iframe src="${liveViewUrl}" allow="clipboard-read; clipboard-write"></iframe>
-</body>
-</html>`;
-
-      writeFileSync('/tmp/omnivera-connect.html', popupHtml);
-
-      // Open as a Chrome app-mode window (no address bar, clean popup)
-      const openCmd = `open /tmp/omnivera-connect.html`;
-      exec(openCmd);
-
+      openPopup(liveViewUrl, PLATFORM_NAME);
       console.log('   Popup opened.\n');
     }
 
@@ -155,28 +121,8 @@ async function main() {
     const currentUrl = page.url();
     console.log(`\n✅ Login detected! Current URL: ${currentUrl}`);
 
-    // Close the popup — user doesn't need to see the agent working
     console.log('   Closing popup...');
-    try {
-      // Write a self-closing HTML page to replace the popup content
-      writeFileSync('/tmp/omnivera-connect.html', `<!DOCTYPE html>
-<html><head><title>Connected</title>
-<style>
-  body { background: #111; color: white; font-family: -apple-system, system-ui, sans-serif;
-    display: flex; align-items: center; justify-content: center; height: 100vh; flex-direction: column; gap: 12px; }
-  .check { width: 48px; height: 48px; background: #4ade80; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; }
-  p { color: #888; font-size: 14px; }
-</style>
-<script>setTimeout(() => window.close(), 3000);</script>
-</head>
-<body>
-  <div class="check">✓</div>
-  <h2>Connected!</h2>
-  <p>Extracting your data — you can close this window.</p>
-</body></html>`);
-    } catch (e) {
-      // popup may already be closed
-    }
+    closePopup();
 
     console.log('\n🤖 Agent taking over...\n');
 

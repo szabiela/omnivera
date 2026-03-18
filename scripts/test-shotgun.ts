@@ -9,7 +9,7 @@
  *
  * This is the "Plaid for everything" flow.
  *
- * Run: npx tsx scripts/test-eventbrite.ts
+ * Run: npx tsx scripts/test-shotgun.ts
  */
 
 import { Stagehand } from '@browserbasehq/stagehand';
@@ -21,9 +21,9 @@ config();
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-const PLATFORM_URL = 'https://www.eventbrite.com/signin/';
-const PLATFORM_NAME = 'Eventbrite';
-const SUCCESS_INDICATORS = ['/organizations', '/myevents', '/dashboard', '/home', '/manage'];
+const PLATFORM_URL = 'https://smartboard.shotgun.live/login';
+const PLATFORM_NAME = 'Shotgun';
+const SUCCESS_INDICATORS = ['/events', '/settings', '/dashboard', '/analytics', '/marketing'];
 const LOGIN_TIMEOUT_MS = 120_000; // 2 minutes for user to log in
 
 async function main() {
@@ -97,7 +97,7 @@ async function main() {
     if (liveViewUrl) {
       console.log('\n═══════════════════════════════════════════════════════════');
       console.log('🔓 LOG IN NOW — A popup window will open.');
-      console.log('   Log into your Eventbrite account.');
+      console.log('   Log into your Shotgun account.');
       console.log('   Handle any CAPTCHAs or 2FA yourself.');
       console.log('   The popup will close once you\'re logged in.');
       console.log('═══════════════════════════════════════════════════════════\n');
@@ -128,117 +128,101 @@ async function main() {
     // Small pause to let the page settle
     await new Promise(resolve => setTimeout(resolve, 3000));
 
-    // ─── Step 5: Navigate to API key settings ────────────────────────────
-    console.log('═══ Agent: Navigating to API key settings ═══\n');
+    // ─── Step 5: Navigate to integrations settings ───────────────────────
+    console.log('═══ Agent: Navigating to Shotgun API settings ═══\n');
 
-    // Go directly to the Eventbrite developer/API page
-    await page.goto('https://www.eventbrite.com/platform/api-keys');
+    await page.goto('https://smartboard.shotgun.live/settings/integrations');
     await page.waitForLoadState('domcontentloaded');
     await new Promise(resolve => setTimeout(resolve, 3000));
 
-    let currentUrl = page.url();
-    console.log(`   Current URL: ${currentUrl}`);
-    await page.screenshot({ path: '/tmp/omnivera-eb-apikeys.png', fullPage: true });
-    console.log('   Screenshot: /tmp/omnivera-eb-apikeys.png\n');
+    console.log(`   Current URL: ${page.url()}`);
+    await page.screenshot({ path: '/tmp/omnivera-shotgun-integrations.png', fullPage: true });
+    console.log('   Screenshot: /tmp/omnivera-shotgun-integrations.png\n');
 
-    // If that redirected, try the platform page
-    if (currentUrl.includes('signin') || currentUrl.includes('login')) {
-      console.log('   Redirected to login — trying alternative path...');
-      await page.goto('https://www.eventbrite.com/platform');
-      await page.waitForLoadState('domcontentloaded');
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      currentUrl = page.url();
-      console.log(`   Current URL: ${currentUrl}\n`);
-    }
+    // ─── Step 6: Open the Shotgun APIs panel ─────────────────────────────
+    console.log('   Opening Shotgun APIs panel...');
+    await stagehand.act('click the "Connect" button next to "Shotgun APIs"');
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Look at what's on the page
-    const pageInfo = await stagehand.extract(
-      'Describe this page. Is this a developer portal, API keys page, or app management page? Are there any API keys, tokens, or OAuth credentials visible? Is there a button to create an app or generate a key?',
-      z.object({
-        page_type: z.string(),
-        description: z.string(),
-        has_api_keys: z.boolean(),
-        has_create_button: z.boolean(),
-      })
-    );
+    await page.screenshot({ path: '/tmp/omnivera-shotgun-api-panel.png', fullPage: true });
+    console.log('   API panel screenshot: /tmp/omnivera-shotgun-api-panel.png\n');
 
-    console.log(`   Page type: ${pageInfo.page_type}`);
-    console.log(`   Description: ${pageInfo.description}`);
-    console.log(`   Has API keys: ${pageInfo.has_api_keys}`);
-    console.log(`   Has create button: ${pageInfo.has_create_button}\n`);
-
-    if (pageInfo.has_create_button && !pageInfo.has_api_keys) {
-      console.log('   Creating a new API app...');
-      await stagehand.act('click the button to create a new app, create API key, or get started');
-      await page.waitForLoadState('domcontentloaded');
-      await new Promise(resolve => setTimeout(resolve, 3000));
-
-      // Fill in app details if needed
-      try {
-        await stagehand.act('if there is a form to fill out, enter "Omnivera" as the app name and "https://mufi.app" as the website URL, then submit the form');
-        await page.waitForLoadState('domcontentloaded');
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      } catch (e) {
-        // May not need to fill a form
-      }
-    }
-
-    console.log('   Extracting API credentials...');
-    await page.screenshot({ path: '/tmp/omnivera-eb-credentials.png', fullPage: true });
-
-    const extractedCreds = await page.evaluate(() => {
-      const results: Record<string, string> = {};
-      const inputs = Array.from(document.querySelectorAll('input[type="text"], input[readonly], input[type="password"]'));
+    // ─── Step 7: Extract Organizer ID ────────────────────────────────────
+    console.log('   Extracting Organizer ID...');
+    const organizerId = await page.evaluate(() => {
+      const inputs = Array.from(document.querySelectorAll('input'));
       for (const input of inputs) {
         const val = (input as HTMLInputElement).value;
-        if (val && val.length > 15) {
-          const label = input.getAttribute('aria-label')
-            || input.getAttribute('name')
-            || input.closest('label')?.textContent?.trim()
-            || input.previousElementSibling?.textContent?.trim()
-            || 'unknown';
-          results[label] = val;
-        }
+        if (val && /^\d{4,}$/.test(val)) return val;
       }
-      const codeBlocks = Array.from(document.querySelectorAll('code, pre, [class*="token"], [class*="key"]'));
-      for (const el of codeBlocks) {
+      const textElements = Array.from(document.querySelectorAll('div, span, p'));
+      for (const el of textElements) {
         const text = el.textContent?.trim();
-        if (text && text.length > 15 && !text.includes(' ')) {
-          results['token'] = text;
-        }
+        if (text && /^\d{4,}$/.test(text) && el.children.length === 0) return text;
       }
-      return results;
+      return null;
+    });
+    console.log(`   🏢 Organizer ID: ${organizerId}\n`);
+
+    // ─── Step 8: Issue API token ─────────────────────────────────────────
+    console.log('   Issuing API token...');
+    await stagehand.act('click the "Issue token" button');
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    await page.screenshot({ path: '/tmp/omnivera-shotgun-token.png', fullPage: true });
+    console.log('   Token screenshot: /tmp/omnivera-shotgun-token.png\n');
+
+    // ─── Step 9: Extract the token ───────────────────────────────────────
+    console.log('   Extracting API token...');
+    const apiToken = await page.evaluate(() => {
+      // Try all inputs first
+      const inputs = Array.from(document.querySelectorAll('input'));
+      for (const input of inputs) {
+        const val = (input as HTMLInputElement).value;
+        if (val && val.length > 20 && val.startsWith('ey')) return val;
+      }
+      // Try text content of any element that looks like a JWT or long token
+      const allElements = Array.from(document.querySelectorAll('div, span, p, textarea, code, pre'));
+      for (const el of allElements) {
+        const text = el.textContent?.trim();
+        if (text && text.length > 20 && text.startsWith('ey') && el.children.length === 0) return text;
+      }
+      // Last resort: check all elements with a title or data attribute containing the token
+      const withAttrs = Array.from(document.querySelectorAll('[title], [data-value], [data-token]'));
+      for (const el of withAttrs) {
+        const val = el.getAttribute('title') || el.getAttribute('data-value') || el.getAttribute('data-token');
+        if (val && val.length > 20) return val;
+      }
+      return null;
     });
 
-    const credKeys = Object.keys(extractedCreds);
-    if (credKeys.length > 0) {
-      console.log('\n   ✅ API credentials extracted securely!');
-      console.log('   Credentials read directly from the DOM — never sent to any AI service.');
-      for (const [label, value] of Object.entries(extractedCreds)) {
-        console.log(`   🔑 ${label}: ${value.substring(0, 8)}...${value.substring(value.length - 4)}`);
-      }
-      console.log('\n   In production, these would be encrypted and stored immediately.');
-      console.log('   No more browser sessions needed for Eventbrite.');
+    if (apiToken) {
+      console.log(`   🔑 API Token: ${apiToken.substring(0, 8)}...${apiToken.substring(apiToken.length - 4)}`);
+      console.log(`   🏢 Organizer ID: ${organizerId}`);
+      console.log('\n   ✅ Shotgun credentials extracted securely!');
+      console.log('   Token was read directly from the DOM — never sent to any AI service.');
+      console.log('   In production, this would be encrypted and stored immediately.');
     } else {
-      console.log('\n   ⚠️  No API credentials found in DOM — check screenshot at /tmp/omnivera-eb-credentials.png');
+      console.log('\n   ⚠️  Token not found in DOM — check screenshot at /tmp/omnivera-shotgun-token.png');
     }
 
-    // ─── Bonus: Pull events while we're here ─────────────────────────────
-    console.log('\n═══ Agent: Extracting events from dashboard ═══\n');
+    // ─── Bonus: Pull events data while we're here ────────────────────────
+    console.log('\n═══ Agent: Extracting events from Smartboard ═══\n');
 
-    await page.goto('https://www.eventbrite.com/organizations/events');
+    await page.goto('https://smartboard.shotgun.live/events');
     await page.waitForLoadState('domcontentloaded');
     await new Promise(resolve => setTimeout(resolve, 3000));
 
     const eventsData = await stagehand.extract(
-      'Extract all events visible on this page. For each event get the name, date, status (draft, live, past, etc.), ticket sales count, and revenue if shown.',
+      'Extract all events visible on this page. For each event get the name, date, venue/location, ticket sales count, revenue, and status (draft, live, past, etc.).',
       z.object({
         events: z.array(z.object({
           name: z.string(),
           date: z.string().optional(),
-          status: z.string().optional(),
+          venue: z.string().optional(),
           tickets_sold: z.string().optional(),
           revenue: z.string().optional(),
+          status: z.string().optional(),
         })),
       })
     );
@@ -246,9 +230,10 @@ async function main() {
     console.log(`   Found ${eventsData.events.length} events:\n`);
     for (const event of eventsData.events) {
       console.log(`   ${event.date || 'No date'} — ${event.name}`);
-      if (event.status) console.log(`      Status: ${event.status}`);
+      if (event.venue) console.log(`      Venue: ${event.venue}`);
       if (event.tickets_sold) console.log(`      Tickets: ${event.tickets_sold}`);
       if (event.revenue) console.log(`      Revenue: ${event.revenue}`);
+      if (event.status) console.log(`      Status: ${event.status}`);
       console.log('');
     }
 
@@ -259,7 +244,7 @@ async function main() {
     console.log('✅ Omnivera hybrid flow complete!');
     console.log('═══════════════════════════════════════════════════════════');
     console.log('\n🎯 What just happened:');
-    console.log('   1. Cloud browser opened → you saw the real RA login page');
+    console.log('   1. Cloud browser opened → you saw the real Shotgun login page');
     console.log('   2. YOU logged in (handled CAPTCHA, 2FA, whatever)');
     console.log('   3. Agent detected login success');
     console.log('   4. Agent navigated the dashboard and extracted data');
